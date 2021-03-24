@@ -71,4 +71,4 @@ def lambda_handler(event, context):
                     "username": username,
                     "avatar_url": twitter_avatar_url,
                 }
-                requests.post(os.environ["discord_webhook"], headers=headers, data=payload)
+                requests.post(os.environ["discord_webhook"], headers=headers, json=payload)
