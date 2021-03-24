@@ -36,7 +36,7 @@ def lambda_handler(event, context):
     }'
 
     """
-    datetime_lower_limit = datetime.utcnow().replace(tzinfo=tz.gettz("UTC")) - relativedelta(int(os.environ["interval_minutes"]))
+    datetime_lower_limit = datetime.utcnow().replace(tzinfo=tz.gettz("UTC")) - relativedelta(minutes=int(os.environ["interval_minutes"]))
 
     for username in event.get("handles", []):
         twitter_headers = {"Authorization": "Bearer {}".format(os.environ["twitter_bearer_token"])}
