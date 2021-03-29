@@ -1,11 +1,65 @@
+from datetime import datetime
 import json
 import os
 
-from datetime import datetime
-from dateutil import tz
-from dateutil.parser import parse
-from dateutil.relativedelta import relativedelta
+from package.dateutil.parser import parse
+from package.dateutil.relativedelta import relativedelta
 import package.requests as requests
+
+
+TWITTER_API_USER_LOOKUP = "https://api.twitter.com/2/users/by/username/{}"
+TWITTER_API_TIMELINE_LOOKUP = "https://api.twitter.com/2/users/{}/tweets"
+
+TWITTER_HEADERS = {"Authorization": "Bearer {}".format(os.environ["twitter_bearer_token"])}
+
+DISCORD_HEADERS = {"Content-Type": "application/json"}
+
+
+def get_datetime_lower_limit():
+    return datetime.utcnow() - relativedelta(minutes=int(os.environ["interval_minutes"]))
+
+
+def get_twitter_user_info(username):
+    user_lookup_params = {"user.fields": "profile_image_url"}
+    response = requests.get(
+        TWITTER_API_USER_LOOKUP.format(username),
+        headers=TWITTER_HEADERS,
+        params=user_lookup_params,
+    )
+    user_data = response.json()["data"]
+    return username, user_data["id"], user_data["profile_image_url"]
+
+
+def get_twitter_timeline(twitter_user_id, exclude_replies=True):
+    timeline_lookup_params = {
+        "user.fields": "name,username",
+        "tweet.fields": "created_at,in_reply_to_user_id",
+        "max_results": 10,
+    }
+    response = requests.get(
+        TWITTER_API_TIMELINE_LOOKUP.format(twitter_user_id),
+        headers=TWITTER_HEADERS,
+        params=timeline_lookup_params,
+    )
+    timeline_data = response.json()["data"]
+
+    if exclude_replies:
+        return [tweet for tweet in timeline_data if "in_reply_to_user_id" not in tweet]
+
+    return timeline_data
+
+
+def filter_tweets_after(tweets, datetime_lower_limit):
+    return [tweet for tweet in tweets if parse(tweet["created_at"]).replace(tzinfo=None) >= datetime_lower_limit]
+
+
+def post_tweet_to_discord_webhook(tweet_id, twitter_username, twitter_avatar_url):
+    payload = {
+        "content": "https://twitter.com/{}/status/{}".format(twitter_username, tweet_id),
+        "username": twitter_username,
+        "avatar_url": twitter_avatar_url,
+    }
+    requests.post(os.environ["discord_webhook"], headers=DISCORD_HEADERS, json=payload)
 
 
 def lambda_handler(event, context):
@@ -36,39 +90,11 @@ def lambda_handler(event, context):
     }'
 
     """
-    datetime_lower_limit = datetime.utcnow().replace(tzinfo=tz.gettz("UTC")) - relativedelta(minutes=int(os.environ["interval_minutes"]))
-
-    for username in event.get("handles", []):
-        twitter_headers = {"Authorization": "Bearer {}".format(os.environ["twitter_bearer_token"])}
-
-        user_lookup_params = {"user.fields": "profile_image_url"}
-        response = requests.get(
-            "https://api.twitter.com/2/users/by/username/{}".format(username),
-            headers=twitter_headers,
-            params=user_lookup_params,
+    users = [get_twitter_user_info(username) for username in event.get("handles", [])]
+    for twitter_username, twitter_user_id, twitter_avatar_url in users:
+        tweets = filter_tweets_after(
+            tweets=get_twitter_timeline(twitter_user_id),
+            datetime_lower_limit=get_datetime_lower_limit(),
         )
-        user_data = response.json()["data"]
-
-        twitter_user_id = user_data["id"]
-        twitter_avatar_url = user_data["profile_image_url"]
-
-        timeline_lookup_params = {"user.fields": "name,username", "tweet.fields": "created_at,in_reply_to_user_id", "max_results": 10}
-        response = requests.get(
-            "https://api.twitter.com/2/users/{}/tweets".format(twitter_user_id),
-            headers=twitter_headers,
-            params=timeline_lookup_params,
-        )
-        timeline_data = response.json()["data"]
-        timeline_excluding_replies = [tweet for tweet in timeline_data if "in_reply_to_user_id" not in tweet]
-
-        for tweet in timeline_excluding_replies:
-            tweet_created_at = parse(tweet["created_at"])
-            tweet_id = tweet["id"]
-            if tweet_created_at >= datetime_lower_limit:
-                headers = {"Content-Type": "application/json"}
-                payload = {
-                    "content": "https://twitter.com/{}/status/{}".format(username, tweet_id),
-                    "username": username,
-                    "avatar_url": twitter_avatar_url,
-                }
-                requests.post(os.environ["discord_webhook"], headers=headers, json=payload)
+        for tweet in tweets:
+            post_tweet_to_discord_webhook(tweet["id"], twitter_username, twitter_avatar_url)
