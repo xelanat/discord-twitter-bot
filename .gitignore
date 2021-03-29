@@ -1,4 +1,5 @@
 package
-my-deployment-package.zip
+deployment-package-*.zip
 .vscode
 .DS_Store
+Pipfile

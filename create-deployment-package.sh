@@ -1,3 +1,5 @@
+current_date=$(date +"%Y%m%d%H%M%S")
+deployment_filename="deployment-package-${current_date}.zip"
 pip install -r requirements.txt --target ./package
-zip -r my-deployment-package.zip package
-zip -g my-deployment-package.zip lambda_function.py
+zip -r $deployment_filename package
+zip -g $deployment_filename lambda_function.py
